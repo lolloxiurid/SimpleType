@@ -1,0 +1,1490 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Frozen Ice Typing - Falling Words</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            flex: 1;
+            position: relative;
+            background: linear-gradient(to bottom, #2c424a, #203541);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        #hidden-input {
+            position: absolute;
+            top: -1000px;
+            left: -1000px;
+            opacity: 0;
+        }
+
+        #hearts-hud {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            display: flex;
+            gap: 6px;
+            pointer-events: none;
+            z-index: 5;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));
+        }
+
+        .heart {
+            font-size: 28px;
+            line-height: 1;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .heart.lost {
+            opacity: 0.25;
+            transform: scale(0.8);
+            filter: grayscale(1);
+        }
+
+        .heart.pulse {
+            animation: heartPulse 0.5s ease;
+        }
+
+        @keyframes heartPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.4); }
+            100% { transform: scale(1); }
+        }
+
+        #multiplier-hud {
+            position: absolute;
+            top: 14px;
+            left: 16px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(0, 212, 255, 0.7);
+            font-weight: bold;
+            font-size: 16px;
+            color: #00d4ff;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+            pointer-events: none;
+            z-index: 5;
+            display: none;
+        }
+
+        #multiplier-hud.active {
+            display: block;
+            animation: multiplierPulse 1.5s infinite;
+        }
+
+        @keyframes multiplierPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        #ui-panel {
+            background-color: #111111;
+            padding: 18px 22px;
+            border-top: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .stat-value {
+            font-size: 22px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 4px 0;
+        }
+
+        .speed-control label {
+            font-size: 13px;
+            color: #ccc;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            white-space: nowrap;
+        }
+
+        .speed-control .icon {
+            font-size: 18px;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, #00d4ff, #005f7a);
+            outline: none;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
+            cursor: pointer;
+        }
+
+        input[type="range"]:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            filter: grayscale(0.5);
+        }
+
+        input[type="range"]:disabled::-webkit-slider-thumb {
+            cursor: not-allowed;
+            border-color: #555;
+            box-shadow: none;
+        }
+
+        input[type="range"]:disabled::-moz-range-thumb {
+            cursor: not-allowed;
+            border-color: #555;
+            box-shadow: none;
+        }
+
+        #multiplier-info {
+            font-size: 12px;
+            color: #00d4ff;
+            text-align: center;
+            letter-spacing: 0.5px;
+            min-height: 16px;
+        }
+
+        #multiplier-info .molt-value {
+            font-weight: bold;
+            color: #00d4ff;
+        }
+
+        /* ============================================================
+           PULSANTE PAUSA (in alto a sinistra, sotto al moltiplicatore)
+           ============================================================ */
+        #pause-btn {
+            position: absolute;
+            top: 56px;
+            left: 16px;
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(0, 212, 255, 0.6);
+            color: #00d4ff;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 6;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+            transition: background 0.2s ease, transform 0.15s ease;
+            font-family: inherit;
+        }
+
+        #pause-btn:hover {
+            background: rgba(0, 212, 255, 0.25);
+        }
+
+        #pause-btn:active {
+            transform: scale(0.92);
+        }
+
+        /* ============================================================
+           SLIDER IMPOSTAZIONI (riutilizzabile)
+           ============================================================ */
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-top: 18px;
+            padding: 0 4px;
+        }
+
+        .setting-row label {
+            font-size: 12px;
+            color: #ccc;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            white-space: nowrap;
+            min-width: 90px;
+            text-align: left;
+        }
+
+        .setting-row .setting-value {
+            font-size: 12px;
+            font-weight: bold;
+            color: #00d4ff;
+            min-width: 42px;
+            text-align: right;
+        }
+
+        .setting-row input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            border-radius: 3px;
+            background: linear-gradient(to right, #00d4ff, #005f7a);
+            outline: none;
+            cursor: pointer;
+        }
+
+        .setting-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
+            cursor: pointer;
+        }
+
+        .setting-row input[type="range"]::-moz-range-thumb {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.6);
+            cursor: pointer;
+        }
+
+        .menu-buttons-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 22px;
+        }
+
+        .menu-buttons-row .menu-btn {
+            margin-top: 0;
+            flex: 1;
+            padding: 12px 16px;
+            font-size: 14px;
+            letter-spacing: 1.2px;
+        }
+
+        /* ============================================================
+           SCHERMATE OVERLAY (menu principale, game over, impostazioni, pausa)
+           ============================================================ */
+        .screen {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.55);
+            backdrop-filter: blur(3px);
+            -webkit-backdrop-filter: blur(3px);
+            animation: fadeIn 0.25s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .menu-panel {
+            text-align: center;
+            background: rgba(15, 25, 35, 0.88);
+            padding: 40px 55px;
+            border-radius: 24px;
+            border: 2px solid rgba(0, 212, 255, 0.5);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 40px rgba(0, 212, 255, 0.15);
+            max-width: 90vw;
+            min-width: 280px;
+        }
+
+        .menu-title {
+            font-size: 32px;
+            margin: 0 0 8px 0;
+            color: #ffffff;
+            text-shadow: 0 2px 12px rgba(0, 212, 255, 0.6);
+            letter-spacing: 1.5px;
+        }
+
+        .menu-subtitle {
+            font-size: 14px;
+            color: #9ec8d8;
+            margin: 0 0 28px 0;
+            letter-spacing: 0.5px;
+        }
+
+        .menu-btn {
+            display: block;
+            width: 100%;
+            margin-top: 12px;
+            padding: 14px 36px;
+            font-size: 17px;
+            font-weight: bold;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #ffffff;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+            pointer-events: auto;
+        }
+
+        .menu-btn-primary {
+            background: linear-gradient(135deg, #00d4ff, #007a99);
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+        }
+
+        .menu-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 22px rgba(0, 212, 255, 0.65);
+            filter: brightness(1.1);
+        }
+
+        .menu-btn-secondary {
+            background: linear-gradient(135deg, #3a4a55, #222a30);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+        }
+
+        .menu-btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+            filter: brightness(1.2);
+        }
+
+        .menu-btn:active {
+            transform: translateY(1px);
+        }
+
+        .go-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 22px;
+        }
+
+        .go-buttons .menu-btn {
+            margin-top: 0;
+            padding: 14px 20px;
+            font-size: 15px;
+            letter-spacing: 1.2px;
+        }
+
+        #game-over-overlay .go-title {
+            font-size: 34px;
+            font-weight: bold;
+            color: #ff4444;
+            text-shadow: 0 2px 12px rgba(0,0,0,0.9);
+            letter-spacing: 2px;
+            margin: 0;
+        }
+
+        #game-over-overlay .go-score {
+            font-size: 22px;
+            color: #ffffff;
+            margin-top: 14px;
+            font-weight: bold;
+        }
+
+        #game-over-overlay .go-score span {
+            color: #00d4ff;
+        }
+
+        #game-over-overlay .menu-panel {
+            border-color: rgba(255, 68, 68, 0.6);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), 0 0 40px rgba(255, 68, 68, 0.15);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="multiplier-hud">✨ x<span id="multiplier-hud-value">1.0</span></div>
+        
+        <button id="pause-btn" title="Pausa">⏸</button>
+        
+        <div id="hearts-hud">
+            <span class="heart" id="heart-1">❤️</span>
+            <span class="heart" id="heart-2">❤️</span>
+            <span class="heart" id="heart-3">❤️</span>
+        </div>
+        
+        <!-- MENU PRINCIPALE -->
+        <div id="main-menu" class="screen">
+            <div class="menu-panel">
+                <h1 class="menu-title">❄️ Frozen Ice Typing ❄️</h1>
+                <p class="menu-subtitle">Impara a scrivere divertendoti!</p>
+                <button class="menu-btn menu-btn-primary" id="menu-play-btn">▶ Gioca</button>
+                <button class="menu-btn menu-btn-secondary" id="menu-settings-btn">⚙ Impostazioni</button>
+            </div>
+        </div>
+        
+        <!-- SCHERMATA IMPOSTAZIONI -->
+        <div id="settings-screen" class="screen" style="display: none;">
+            <div class="menu-panel">
+                <h1 class="menu-title">⚙ Impostazioni</h1>
+                <p class="menu-subtitle">Personalizza il tuo gioco</p>
+                
+                <div class="setting-row">
+                    <label for="blur-slider">Sfocatura</label>
+                    <input type="range" id="blur-slider" min="0" max="12" value="4" step="1">
+                    <span class="setting-value" id="blur-value">4 px</span>
+                </div>
+                
+                <div class="menu-buttons-row">
+                    <button class="menu-btn menu-btn-secondary" id="settings-back-btn">← Indietro</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- SCHERMATA PAUSA -->
+        <div id="pause-screen" class="screen" style="display: none;">
+            <div class="menu-panel">
+                <h1 class="menu-title">⏸ Pausa</h1>
+                <p class="menu-subtitle">La partita è in pausa</p>
+                <button class="menu-btn menu-btn-primary" id="pause-resume-btn">▶ Riprendi</button>
+                <button class="menu-btn menu-btn-secondary" id="pause-menu-btn">🏠 Torna al Menu</button>
+            </div>
+        </div>
+        
+        <!-- GAME OVER -->
+        <div id="game-over-overlay" class="screen" style="display: none;">
+            <div class="menu-panel">
+                <div class="go-title">GAME OVER</div>
+                <div class="go-score">Punteggio: <span id="final-score">0</span></div>
+                <div class="go-buttons">
+                    <button id="restart-btn" class="menu-btn menu-btn-primary">🔄 Rigioca</button>
+                    <button id="menu-btn" class="menu-btn menu-btn-secondary">🏠 Menu</button>
+                </div>
+            </div>
+        </div>
+        
+        <input type="text" id="hidden-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+
+    <div id="ui-panel">
+        <div class="stats-row">
+            <div>
+                <div class="stat-label">Punti</div>
+                <div class="stat-value" id="score-display">0</div>
+            </div>
+            <div>
+                <div class="stat-label">Parola</div>
+                <div class="stat-value" id="target-display">-</div>
+            </div>
+        </div>
+
+        <div class="speed-control">
+            <span class="icon">🐢</span>
+            <label>Velocità</label>
+            <input type="range" id="speed-slider" min="1" max="10" value="2" step="1">
+            <span class="icon">🐇</span>
+        </div>
+        
+        <div id="multiplier-info">Moltiplicatore: <span class="molt-value" id="multiplier-info-value">x1.0</span></div>
+    </div>
+
+    <script>
+        // ============================================================
+        // CONFIGURAZIONE ASSET (puoi cambiare qui i file)
+        // ============================================================
+        
+        // --- SFONDO ---
+        const PERCORSO_SFONDO = "bgElsa.jpg";
+        // Blur applicato allo sfondo (px). 0 = nessuno, 4 = leggero.
+        // Il valore effettivo è regolabile dalle impostazioni (variabile sotto).
+        const BLUR_SFONDO_DEFAULT = 4;
+        let blurSfondo = BLUR_SFONDO_DEFAULT;
+        
+        // --- PERSONAGGIO ---
+        // Immagine del personaggio (es. Olaf). Consigliato PNG trasparente.
+        const PERCORSO_PERSONAGGIO = "olaf.png";
+        // Altezza del personaggio in % dell'altezza del canvas.
+        const ALTEZZA_PERSONAGGIO_RATIO = 0.18;
+        // Distanza dei piedi dal bordo inferiore (px)
+        const MARGINE_FONDO_PERSONAGGIO = 5;
+        
+        // --- PALLA DI NEVE ---
+        const PERCORSO_PALLA = "snowball.png";
+        // Dimensione della palla di neve in px
+        const DIMENSIONE_PALLA = 36;
+        // Durata del volo della palla (ms)
+        const DURATA_VOLO_PALLA = 380;
+        // Altezza dell'arco parabolico della traiettoria (px)
+        const ARCO_PALLA = 60;
+
+        // ============================================================
+        // SETUP DEL CANVAS E DOM (deve essere PRIMA di tutto ciò che lo usa)
+        // ============================================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score-display');
+        const targetDisplay = document.getElementById('target-display');
+        const speedSlider = document.getElementById('speed-slider');
+        const restartBtn = document.getElementById('restart-btn');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const multiplierHud = document.getElementById('multiplier-hud');
+        const multiplierHudValue = document.getElementById('multiplier-hud-value');
+        const multiplierInfoValue = document.getElementById('multiplier-info-value');
+        
+        // Riferimenti alle schermate
+        const mainMenu = document.getElementById('main-menu');
+        const menuPlayBtn = document.getElementById('menu-play-btn');
+        const menuBtn = document.getElementById('menu-btn');
+        const gameOverOverlay = document.getElementById('game-over-overlay');
+        
+        // Pausa
+        const pauseBtn = document.getElementById('pause-btn');
+        const pauseScreen = document.getElementById('pause-screen');
+        const pauseResumeBtn = document.getElementById('pause-resume-btn');
+        const pauseMenuBtn = document.getElementById('pause-menu-btn');
+        
+        // Impostazioni
+        const settingsScreen = document.getElementById('settings-screen');
+        const menuSettingsBtn = document.getElementById('menu-settings-btn');
+        const settingsBackBtn = document.getElementById('settings-back-btn');
+        const blurSlider = document.getElementById('blur-slider');
+        const blurValue = document.getElementById('blur-value');
+
+        const hearts = [
+            document.getElementById('heart-1'),
+            document.getElementById('heart-2'),
+            document.getElementById('heart-3')
+        ];
+
+        // --- POSIZIONE PERSONAGGIO (dichiarata PRIMA delle funzioni che la usano) ---
+        let posPersonaggio = { x: 0, y: 0, larghezza: 0, altezza: 0 };
+        let direzionePersonaggio = 1; // 1 = destra, -1 = sinistra
+
+        // --- ASSET (immagini) ---
+        let sfondoImage = null;
+        let sfondoBlurCanvas = null;
+        let personaggioImage = null;
+        let pallaImage = null;
+
+        // ============================================================
+        // FUNZIONI DI POSIZIONAMENTO (definite PRIMA di essere chiamate)
+        // ============================================================
+        function aggiornaPosizionePersonaggio() {
+            const h = canvas.height * ALTEZZA_PERSONAGGIO_RATIO;
+            const w = personaggioImage
+                ? h * (personaggioImage.width / personaggioImage.height)
+                : h * 0.7;
+            posPersonaggio = {
+                x: canvas.width / 2,
+                y: canvas.height - MARGINE_FONDO_PERSONAGGIO,
+                larghezza: w,
+                altezza: h
+            };
+        }
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            aggiornaPosizionePersonaggio();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // ============================================================
+        // CARICAMENTO ASSET
+        // ============================================================
+
+        // SFONDO
+        (function caricaSfondo() {
+            const img = new Image();
+            img.onload = () => {
+                sfondoImage = img;
+                rigeneraSfondoSfocato();
+            };
+            img.onerror = () => {
+                console.warn("Impossibile caricare lo sfondo: " + PERCORSO_SFONDO);
+            };
+            img.src = PERCORSO_SFONDO;
+        })();
+        
+        // Rigenera il canvas offscreen con lo sfondo sfocato usando il
+        // valore attuale di `blurSfondo`. Chiamato al load e ad ogni cambio
+        // dello slider nelle impostazioni.
+        function rigeneraSfondoSfocato() {
+            if (!sfondoImage) return;
+            sfondoBlurCanvas = creaSfondoSfocato(sfondoImage, blurSfondo);
+        }
+        
+        // Crea versione sfocata dello sfondo una volta sola (performance)
+        function creaSfondoSfocato(img, blurPx) {
+            const off = document.createElement('canvas');
+            off.width = img.width;
+            off.height = img.height;
+            const octx = off.getContext('2d');
+            
+            if (blurPx <= 0) {
+                octx.drawImage(img, 0, 0);
+                return off;
+            }
+            
+            const pad = blurPx * 2;
+            const scala = (img.width + pad * 2) / img.width;
+            const drawW = img.width * scala;
+            const drawH = img.height * scala;
+            const drawX = (img.width - drawW) / 2;
+            const drawY = (img.height - drawH) / 2;
+            
+            octx.filter = `blur(${blurPx}px)`;
+            octx.drawImage(img, drawX, drawY, drawW, drawH);
+            octx.filter = 'none';
+            
+            return off;
+        }
+
+        // PERSONAGGIO
+        (function caricaPersonaggio() {
+            const img = new Image();
+            img.onload = () => {
+                personaggioImage = img;
+                aggiornaPosizionePersonaggio();
+            };
+            img.onerror = () => {
+                console.warn("Impossibile caricare il personaggio: " + PERCORSO_PERSONAGGIO +
+                             " — verrà usato un pupazzo di neve di default.");
+                aggiornaPosizionePersonaggio();
+            };
+            img.src = PERCORSO_PERSONAGGIO;
+        })();
+
+        // PALLA DI NEVE
+        (function caricaPalla() {
+            const img = new Image();
+            img.onload = () => { pallaImage = img; };
+            img.onerror = () => {
+                console.warn("Impossibile caricare la palla: " + PERCORSO_PALLA +
+                             " — verrà disegnato un cerchio bianco di default.");
+            };
+            img.src = PERCORSO_PALLA;
+        })();
+
+        // ============================================================
+        // STATO DEL GIOCO
+        // ============================================================
+        const dizionario = ["NEVE", "GELO", "ORSO", "PINO", "CASA", "SOLE", "VENTO", "STELLA", "FIOCCO", "GATTO", "CANE", "MARE", "LUNA", "PANE", "MANO", "PALLA", "BOCCA", "ACQUA"];
+        
+        let punteggio = 0;
+        let vite = 3;
+        let giocoAttivo = false;
+        let gameOver = false;
+        
+        let paroleCadenti = [];
+        let palleNeve = [];
+        let velocitaBase = 0.15;
+        let moltiplicatore = 1.0;
+        
+        let prossimaSogliaSpawn = 110;
+        
+        let parolaAttiva = null;
+        let lettereDigitate = 0;
+        
+        let particelle = [];
+        let shakeTimer = 0;
+
+        function calcolaMoltiplicatore(livello) {
+            return 1 + (livello - 1) * 0.5;
+        }
+
+        function applicaSpeedSlider() {
+            const livello = parseInt(speedSlider.value);
+            velocitaBase = 0.15 + (livello - 1) * 0.117;
+            moltiplicatore = calcolaMoltiplicatore(livello);
+            
+            const moltText = 'x' + moltiplicatore.toFixed(1);
+            multiplierHudValue.innerText = moltiplicatore.toFixed(1);
+            multiplierInfoValue.innerText = moltText;
+        }
+
+        speedSlider.addEventListener('input', applicaSpeedSlider);
+
+        // ============================================================
+        // NAVIGAZIONE TRA SCHERMATE (menu, impostazioni, gioco, pausa, game over)
+        // ============================================================
+        
+        // Resetta SOLO lo stato di gioco (punteggio, vite, array, HUD).
+        // Non tocca quali schermate sono visibili.
+        function resetStatoGioco() {
+            punteggio = 0;
+            vite = 3;
+            gameOver = false;
+            paroleCadenti = [];
+            palleNeve = [];
+            particelle = [];
+            parolaAttiva = null;
+            lettereDigitate = 0;
+            prossimaSogliaSpawn = 110;
+            shakeTimer = 0;
+            direzionePersonaggio = 1;
+            
+            scoreDisplay.innerText = '0';
+            targetDisplay.innerText = '-';
+            
+            hearts.forEach(h => {
+                h.classList.remove('lost', 'pulse');
+            });
+            
+            hiddenInput.value = '';
+        }
+        
+        // Nasconde tutte le schermate overlay
+        function nascondiTutteLeSchermate() {
+            mainMenu.style.display = 'none';
+            gameOverOverlay.style.display = 'none';
+            settingsScreen.style.display = 'none';
+            pauseScreen.style.display = 'none';
+        }
+        
+        // Mostra il menu principale (da qualsiasi stato)
+        function mostraMenu() {
+            giocoAttivo = false;
+            resetStatoGioco();
+            
+            speedSlider.disabled = false;
+            applicaSpeedSlider();
+            multiplierHud.classList.remove('active');
+            pauseBtn.style.display = 'none';
+            
+            nascondiTutteLeSchermate();
+            mainMenu.style.display = 'flex';
+        }
+        
+        // Mostra la schermata impostazioni (raggiungibile SOLO dal menu)
+        function mostraImpostazioni() {
+            nascondiTutteLeSchermate();
+            settingsScreen.style.display = 'flex';
+        }
+        
+        // Avvia una nuova partita
+        function avviaGioco() {
+            resetStatoGioco();
+            
+            giocoAttivo = true;
+            speedSlider.disabled = true;
+            multiplierHud.classList.add('active');
+            pauseBtn.style.display = 'flex';
+            
+            nascondiTutteLeSchermate();
+            
+            hiddenInput.focus();
+        }
+        
+        // Mette in pausa la partita
+        function mettiInPausa() {
+            if (!giocoAttivo || gameOver) return;
+            giocoAttivo = false;
+            pauseScreen.style.display = 'flex';
+        }
+        
+        // Riprende la partita dopo la pausa
+        function riprendiGioco() {
+            if (gameOver) return;
+            giocoAttivo = true;
+            pauseScreen.style.display = 'none';
+            hiddenInput.focus();
+        }
+        
+        // --- LISTENER NAVIGAZIONE ---
+        menuPlayBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            avviaGioco();
+        });
+        
+        menuSettingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mostraImpostazioni();
+        });
+        
+        settingsBackBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            nascondiTutteLeSchermate();
+            mainMenu.style.display = 'flex';
+        });
+        
+        pauseResumeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            riprendiGioco();
+        });
+        
+        pauseMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mostraMenu();
+        });
+        
+        pauseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mettiInPausa();
+        });
+        
+        restartBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            avviaGioco();
+        });
+        
+        menuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            mostraMenu();
+        });
+        
+        // --- LISTENER IMPOSTAZIONI ---
+        blurSlider.addEventListener('input', (e) => {
+            blurSfondo = parseInt(e.target.value);
+            blurValue.innerText = blurSfondo + ' px';
+            rigeneraSfondoSfocato();
+        });
+
+        // --- GESTIONE INPUT ---
+        const hiddenInput = document.getElementById('hidden-input');
+
+        // Il click sul canvas serve solo a ri-focalizzare l'input (utile
+        // su mobile per far riapparire la tastiera virtuale durante la partita).
+        canvas.addEventListener('click', () => {
+            if (giocoAttivo && !gameOver) {
+                hiddenInput.focus();
+            }
+        });
+        
+        // ESC mette in pausa durante la partita
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && giocoAttivo && !gameOver) {
+                e.preventDefault();
+                mettiInPausa();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (!giocoAttivo || gameOver) return;
+            
+            const key = e.key;
+            if (key.length !== 1) return;
+            const lettera = key.toUpperCase();
+            if (lettera < 'A' || lettera > 'Z') return;
+            
+            e.preventDefault();
+            controllaLettera(lettera);
+        });
+
+        hiddenInput.addEventListener('input', (e) => {
+            if (!giocoAttivo || gameOver) return;
+            
+            const inputVal = hiddenInput.value.toUpperCase();
+            
+            if (inputVal.length > 0) {
+                for (const ch of inputVal) {
+                    if (ch >= 'A' && ch <= 'Z') {
+                        controllaLettera(ch);
+                    }
+                }
+            }
+            
+            hiddenInput.value = '';
+        });
+
+        // --- SPAWN ADATTIVO ---
+        function misuraLarghezza(testo) {
+            ctx.font = "bold 30px 'Segoe UI', Arial";
+            return ctx.measureText(testo).width;
+        }
+
+        function dovreiSpawnare() {
+            let minY = Infinity;
+            for (const p of paroleCadenti) {
+                if (p.colpita || p.inDistruzione) continue;
+                if (p.y < minY) minY = p.y;
+            }
+            
+            if (minY === Infinity) return true;
+            
+            return minY >= prossimaSogliaSpawn;
+        }
+
+        function creaParola() {
+            const testo = dizionario[Math.floor(Math.random() * dizionario.length)];
+            const larghezzaNuova = misuraLarghezza(testo);
+            
+            const paddingBolla = 18;
+            const gap = 25;
+            const margine = 15;
+            
+            const halfNuova = larghezzaNuova / 2 + paddingBolla;
+            const minX = margine + halfNuova;
+            const maxX = canvas.width - margine - halfNuova;
+            
+            if (minX >= maxX) {
+                paroleCadenti.push({
+                    testo: testo,
+                    x: canvas.width / 2,
+                    y: -30,
+                    velocita: velocitaBase * (0.9 + Math.random() * 0.2),
+                    colpita: false,
+                    inDistruzione: false
+                });
+                return;
+            }
+            
+            const zonaControllo = Math.max(200, canvas.height * 0.5);
+            
+            const TENTATIVI = 15;
+            let migliorX = (minX + maxX) / 2;
+            let migliorDistanza = -Infinity;
+            
+            for (let t = 0; t < TENTATIVI; t++) {
+                const x = minX + Math.random() * (maxX - minX);
+                let distanzaMinima = Infinity;
+                
+                for (const p of paroleCadenti) {
+                    if (p.colpita) continue;
+                    if (p.y > zonaControllo) continue;
+                    
+                    const larghezzaEsistente = misuraLarghezza(p.testo) / 2 + paddingBolla;
+                    const dx = Math.abs(p.x - x);
+                    const distanza = dx - (larghezzaEsistente + halfNuova + gap);
+                    
+                    if (distanza < distanzaMinima) distanzaMinima = distanza;
+                }
+                
+                if (distanzaMinima === Infinity) distanzaMinima = 10000;
+                
+                if (distanzaMinima > migliorDistanza) {
+                    migliorDistanza = distanzaMinima;
+                    migliorX = x;
+                }
+                
+                if (distanzaMinima > 0) break;
+            }
+            
+            paroleCadenti.push({
+                testo: testo,
+                x: migliorX,
+                y: -30,
+                velocita: velocitaBase * (0.9 + Math.random() * 0.2),
+                colpita: false,
+                inDistruzione: false
+            });
+        }
+
+        // --- DIGITAZIONE (progresso conservato) ---
+        function controllaLettera(lettera) {
+            if (!parolaAttiva) {
+                let candidata = null;
+                let maxY = -1;
+                
+                for (const p of paroleCadenti) {
+                    if (p.colpita || p.inDistruzione) continue;
+                    if (p.testo[0] === lettera && p.y > maxY) {
+                        maxY = p.y;
+                        candidata = p;
+                    }
+                }
+                
+                if (candidata) {
+                    parolaAttiva = candidata;
+                    lettereDigitate = 1;
+                    aggiornaTargetDisplay();
+                    
+                    if (lettereDigitate === candidata.testo.length) {
+                        completaParola(candidata);
+                    }
+                }
+                return;
+            }
+            
+            const letteraAttesa = parolaAttiva.testo[lettereDigitate];
+            
+            if (lettera === letteraAttesa) {
+                lettereDigitate++;
+                aggiornaTargetDisplay();
+                
+                if (lettereDigitate === parolaAttiva.testo.length) {
+                    completaParola(parolaAttiva);
+                }
+            } else {
+                shakeTimer = 15;
+            }
+        }
+
+        function aggiornaTargetDisplay() {
+            if (!parolaAttiva) {
+                targetDisplay.innerText = '-';
+                return;
+            }
+            const fatta = parolaAttiva.testo.substring(0, lettereDigitate);
+            const resta = parolaAttiva.testo.substring(lettereDigitate);
+            targetDisplay.innerText = fatta + resta.toLowerCase();
+        }
+
+        function completaParola(parola) {
+            parola.inDistruzione = true;
+            
+            const puntiBase = 10 * parola.testo.length;
+            const puntiGuadagnati = Math.round(puntiBase * moltiplicatore);
+            punteggio += puntiGuadagnati;
+            scoreDisplay.innerText = punteggio;
+            
+            lanciaPallaVerso(parola);
+            
+            parolaAttiva = null;
+            lettereDigitate = 0;
+            targetDisplay.innerText = '-';
+        }
+
+        // --- PALLE DI NEVE ---
+        function lanciaPallaVerso(parola) {
+            const versoDestra = parola.x > posPersonaggio.x;
+            direzionePersonaggio = versoDestra ? 1 : -1;
+            
+            const manoX = posPersonaggio.x + direzionePersonaggio * posPersonaggio.larghezza * 0.30;
+            const manoY = posPersonaggio.y - posPersonaggio.altezza * 0.55;
+            
+            palleNeve.push({
+                startX: manoX,
+                startY: manoY,
+                endX: parola.x,
+                endY: parola.y,
+                parola: parola,
+                startTime: performance.now(),
+                durata: DURATA_VOLO_PALLA,
+                rotazione: 0,
+                currX: manoX,
+                currY: manoY
+            });
+        }
+
+        function aggiornaPalleNeve(now) {
+            for (let i = palleNeve.length - 1; i >= 0; i--) {
+                const p = palleNeve[i];
+                const t = Math.min(1, (now - p.startTime) / p.durata);
+                
+                const x = p.startX + (p.endX - p.startX) * t;
+                const yBase = p.startY + (p.endY - p.startY) * t;
+                const y = yBase - Math.sin(t * Math.PI) * ARCO_PALLA;
+                
+                p.currX = x;
+                p.currY = y;
+                p.rotazione += 0.20;
+                
+                if (t >= 1) {
+                    creaEsplosione(p.parola.x, p.parola.y);
+                    p.parola.colpita = true;
+                    palleNeve.splice(i, 1);
+                }
+            }
+        }
+
+        function disegnaPalleNeve() {
+            for (const p of palleNeve) {
+                ctx.save();
+                ctx.translate(p.currX, p.currY);
+                ctx.rotate(p.rotazione);
+                
+                if (pallaImage) {
+                    ctx.drawImage(
+                        pallaImage,
+                        -DIMENSIONE_PALLA / 2, -DIMENSIONE_PALLA / 2,
+                        DIMENSIONE_PALLA, DIMENSIONE_PALLA
+                    );
+                } else {
+                    ctx.fillStyle = "#ffffff";
+                    ctx.strokeStyle = "#a0d8f0";
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, DIMENSIONE_PALLA / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    ctx.fillStyle = "rgba(180, 220, 240, 0.5)";
+                    ctx.beginPath();
+                    ctx.arc(-4, -4, 3, 0, Math.PI * 2);
+                    ctx.arc(5, 2, 2, 0, Math.PI * 2);
+                    ctx.arc(-2, 6, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                
+                ctx.restore();
+            }
+        }
+
+        // --- DISEGNO PERSONAGGIO ---
+        function disegnaPersonaggio() {
+            ctx.save();
+            ctx.translate(posPersonaggio.x, posPersonaggio.y);
+            
+            if (direzionePersonaggio === -1) {
+                ctx.scale(-1, 1);
+            }
+            
+            if (personaggioImage) {
+                ctx.drawImage(
+                    personaggioImage,
+                    -posPersonaggio.larghezza / 2,
+                    -posPersonaggio.altezza,
+                    posPersonaggio.larghezza,
+                    posPersonaggio.altezza
+                );
+            } else {
+                disegnaPupazzoNeveFallback(posPersonaggio.larghezza, posPersonaggio.altezza);
+            }
+            
+            ctx.restore();
+        }
+
+        function disegnaPupazzoNeveFallback(w, h) {
+            ctx.fillStyle = "#ffffff";
+            ctx.strokeStyle = "#c8e6f0";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, -h * 0.22, w * 0.38, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.arc(0, -h * 0.68, w * 0.26, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = "#222";
+            ctx.beginPath();
+            ctx.arc(0, -h * 0.30, 2.5, 0, Math.PI * 2);
+            ctx.arc(0, -h * 0.20, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.beginPath();
+            ctx.arc(-w * 0.09, -h * 0.72, 2.5, 0, Math.PI * 2);
+            ctx.arc(w * 0.09, -h * 0.72, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = "#ff8c1a";
+            ctx.beginPath();
+            ctx.moveTo(0, -h * 0.68);
+            ctx.lineTo(w * 0.18, -h * 0.66);
+            ctx.lineTo(0, -h * 0.64);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = "#6b3e1f";
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.moveTo(-w * 0.30, -h * 0.30);
+            ctx.lineTo(-w * 0.55, -h * 0.42);
+            ctx.moveTo(w * 0.30, -h * 0.30);
+            ctx.lineTo(w * 0.55, -h * 0.42);
+            ctx.stroke();
+        }
+
+        // --- PARTICELLE ---
+        function creaEsplosione(x, y) {
+            for (let i = 0; i < 18; i++) {
+                particelle.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    vita: 1,
+                    colore: `hsl(${180 + Math.random() * 40}, 100%, ${55 + Math.random() * 30}%)`,
+                    raggio: 2 + Math.random() * 3
+                });
+            }
+        }
+
+        function aggiornaParticelle() {
+            for (let i = particelle.length - 1; i >= 0; i--) {
+                const p = particelle[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.15;
+                p.vita -= 0.02;
+                
+                if (p.vita <= 0) {
+                    particelle.splice(i, 1);
+                }
+            }
+        }
+
+        function disegnaParticelle() {
+            for (const p of particelle) {
+                ctx.globalAlpha = p.vita;
+                ctx.fillStyle = p.colore;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.raggio * p.vita, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // --- DISEGNO PAROLE ---
+        function disegnaParole() {
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            
+            const shakeOffset = shakeTimer > 0 ? Math.sin(shakeTimer * 1.5) * 4 : 0;
+            
+            for (const p of paroleCadenti) {
+                if (p.colpita) continue;
+                
+                const fontSize = 30;
+                ctx.font = `bold ${fontSize}px 'Segoe UI', Arial`;
+                
+                const larghezza = ctx.measureText(p.testo).width;
+                const padding = 18;
+                
+                const offsetX = (parolaAttiva === p) ? shakeOffset : 0;
+                const offsetY = (parolaAttiva === p) ? shakeOffset * 0.5 : 0;
+                
+                const drawX = p.x + offsetX;
+                const drawY = p.y + offsetY;
+                
+                if (parolaAttiva === p) {
+                    ctx.fillStyle = "rgba(44, 66, 74, 0.95)";
+                    ctx.strokeStyle = shakeTimer > 0 ? "rgba(255, 100, 100, 0.9)" : "rgba(0, 212, 255, 0.9)";
+                    ctx.lineWidth = 3;
+                } else if (p.inDistruzione) {
+                    ctx.fillStyle = "rgba(44, 66, 74, 0.95)";
+                    ctx.strokeStyle = "rgba(255, 215, 0, 0.9)";
+                    ctx.lineWidth = 3;
+                } else {
+                    ctx.fillStyle = "rgba(44, 66, 74, 0.9)";
+                    ctx.strokeStyle = "rgba(0, 212, 255, 0.7)";
+                    ctx.lineWidth = 2.5;
+                }
+                
+                roundRect(ctx, drawX - larghezza/2 - padding, drawY - fontSize/2 - 10, larghezza + padding*2, fontSize + 20, 14);
+                ctx.fill();
+                ctx.stroke();
+                
+                if (parolaAttiva === p) {
+                    const parteFatta = p.testo.substring(0, lettereDigitate);
+                    const parteResta = p.testo.substring(lettereDigitate);
+                    
+                    const larghezzaFatta = ctx.measureText(parteFatta).width;
+                    const larghezzaResta = ctx.measureText(parteResta).width;
+                    const totale = larghezzaFatta + larghezzaResta;
+                    
+                    const startX = drawX - totale/2;
+                    
+                    ctx.textAlign = "left";
+                    ctx.fillStyle = "#00d4ff";
+                    ctx.fillText(parteFatta, startX, drawY);
+                    
+                    ctx.fillStyle = "#ffffff";
+                    ctx.fillText(parteResta, startX + larghezzaFatta, drawY);
+                    ctx.textAlign = "center";
+                } else if (p.inDistruzione) {
+                    ctx.fillStyle = "#00d4ff";
+                    ctx.fillText(p.testo, drawX, drawY);
+                } else {
+                    ctx.fillStyle = "#ffffff";
+                    ctx.fillText(p.testo, drawX, drawY);
+                }
+            }
+        }
+
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        }
+
+        // --- SFONDO ---
+        function disegnaSfondo() {
+            if (sfondoBlurCanvas) {
+                const imgW = sfondoBlurCanvas.width;
+                const imgH = sfondoBlurCanvas.height;
+                const canvasW = canvas.width;
+                const canvasH = canvas.height;
+                
+                const scala = Math.max(canvasW / imgW, canvasH / imgH);
+                const drawW = imgW * scala;
+                const drawH = imgH * scala;
+                const drawX = (canvasW - drawW) / 2;
+                const drawY = (canvasH - drawH) / 2;
+                
+                ctx.drawImage(sfondoBlurCanvas, drawX, drawY, drawW, drawH);
+                
+                ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
+                ctx.fillRect(0, 0, canvasW, canvasH);
+            }
+            
+            ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+            const tempo = performance.now();
+            for (let i = 0; i < 60; i++) {
+                const x = (i * 137.5) % canvas.width;
+                const y = (i * 73.3 + tempo * 0.015) % canvas.height;
+                ctx.beginPath();
+                ctx.arc(x, y, 1.5 + (i % 3) * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function aggiornaCuori() {
+            hearts.forEach((heart, index) => {
+                const numeroCuore = index + 1;
+                if (numeroCuore <= vite) {
+                    heart.classList.remove('lost');
+                } else {
+                    heart.classList.add('lost');
+                    heart.classList.add('pulse');
+                    setTimeout(() => heart.classList.remove('pulse'), 500);
+                }
+            });
+        }
+
+        // --- LOOP PRINCIPALE ---
+        function draw(timestamp) {
+            if (!timestamp) timestamp = performance.now();
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            disegnaSfondo();
+            disegnaPersonaggio();
+            
+            if (shakeTimer > 0) shakeTimer--;
+            
+            if (giocoAttivo && !gameOver) {
+                if (dovreiSpawnare()) {
+                    creaParola();
+                    prossimaSogliaSpawn = canvas.height * 0.20 + Math.random() * canvas.height * 0.08;
+                }
+                
+                for (let i = paroleCadenti.length - 1; i >= 0; i--) {
+                    const p = paroleCadenti[i];
+                    
+                    if (p.colpita) {
+                        paroleCadenti.splice(i, 1);
+                        continue;
+                    }
+                    
+                    p.y += p.velocita;
+                    
+                    if (p.y > canvas.height - 45) {
+                        if (p.inDistruzione) {
+                            paroleCadenti.splice(i, 1);
+                            continue;
+                        }
+                        
+                        if (parolaAttiva === p) {
+                            parolaAttiva = null;
+                            lettereDigitate = 0;
+                            targetDisplay.innerText = '-';
+                        }
+                        
+                        paroleCadenti.splice(i, 1);
+                        
+                        vite--;
+                        aggiornaCuori();
+                        
+                        if (vite <= 0) {
+                            gameOver = true;
+                            giocoAttivo = false;
+                            finalScoreDisplay.innerText = punteggio;
+                            gameOverOverlay.style.display = 'flex';
+                            targetDisplay.innerText = '-';
+                            multiplierHud.classList.remove('active');
+                            pauseBtn.style.display = 'none';
+                            speedSlider.disabled = false;
+                        }
+                    }
+                }
+                
+                aggiornaPalleNeve(timestamp);
+                aggiornaParticelle();
+            }
+            
+            disegnaParole();
+            disegnaPalleNeve();
+            disegnaParticelle();
+            
+            if (giocoAttivo && !gameOver) {
+                ctx.strokeStyle = "rgba(255, 80, 80, 0.35)";
+                ctx.lineWidth = 2;
+                ctx.setLineDash([12, 10]);
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height - 40);
+                ctx.lineTo(canvas.width, canvas.height - 40);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            
+            requestAnimationFrame(draw);
+        }
+
+        // --- INIZIALIZZAZIONE ---
+        applicaSpeedSlider();
+        aggiornaPosizionePersonaggio();
+        
+        // Inizializza lo slider della sfocatura al valore di default
+        blurSlider.value = blurSfondo;
+        blurValue.innerText = blurSfondo + ' px';
+        
+        mostraMenu();   // mostra il menu principale all'avvio
+        draw();
+    </script>
+</body>
+</html>
