@@ -17,6 +17,11 @@ const multiplierHudValue = document.getElementById('multiplier-hud-value');
 const multiplierInfoValue = document.getElementById('multiplier-info-value');
 const hiddenInput = document.getElementById('hidden-input');
 
+// Monete
+const coinsHud = document.getElementById('coins-hud');
+const coinsValue = document.getElementById('coins-value');
+const coinToast = document.getElementById('coin-toast');
+
 // Schermate
 const loginScreen = document.getElementById('login-screen');
 const mainMenu = document.getElementById('main-menu');
@@ -77,12 +82,10 @@ const hearts = [
 // ============================================================
 // 2. SUPABASE CLIENT
 // ============================================================
-// ⚠️ NON chiamare questa variabile `supabase`:
-// la libreria CDN di Supabase crea una proprietà globale
-// `window.supabase` NON configurabile, e una `let supabase`
-// causerebbe "redeclaration of non-configurable global property".
+// NON chiamare questa variabile `supabase`: la libreria CDN crea
+// `window.supabase` non-configurabile e la ridefinizione andrebbe in errore.
 let sbClient = null;
-let currentUser = null;    // { id, username } oppure null (ospite)
+let currentUser = null;
 let isGuest = false;
 
 try {
@@ -106,8 +109,10 @@ let blurSfondo = BLUR_SFONDO_DEFAULT;
 let audioCtx = null;
 let suonoParolaAudio = null;
 let suonoVitaAudio = null;
+let suonoMonetaAudio = null;
 const VOLUME_SUONO_PAROLA = 0.42;
 const VOLUME_SUONO_VITA = 0.32;
+const VOLUME_SUONO_MONETA = 0.45;
 
 // Mondo
 let mondoCorrente = MONDI[0];
@@ -146,6 +151,9 @@ let shakeTimer = 0;
 
 // Record
 let bestScoreCache = 0;
+
+// Monete
+let currentCoins = 0;
 
 // ============================================================
 // 4. POSIZIONAMENTO PERSONAGGIO
@@ -230,6 +238,18 @@ async function registrati(username, password) {
     currentUser = { id: data.user.id, username: username.trim() };
     isGuest = false;
     
+    try {
+        await sbClient.from('profiles').insert({
+            id: currentUser.id,
+            username: currentUser.username,
+            coins: 0
+        });
+    } catch (e) {
+        console.warn("Errore creazione profilo:", e);
+    }
+    currentCoins = 0;
+    aggiornaCoinsHud();
+    
     setAuthMessage("Registrazione completata!", "success");
     setTimeout(async () => {
         await caricaBestScore();
@@ -267,7 +287,7 @@ async function accedi(username, password) {
     
     setAuthMessage("Accesso riuscito!", "success");
     setTimeout(async () => {
-        await caricaBestScore();
+        await Promise.all([caricaBestScore(), caricaProfilo()]);
         mostraMenuPrincipale();
     }, 400);
 }
@@ -279,6 +299,8 @@ async function logout() {
     currentUser = null;
     isGuest = false;
     bestScoreCache = 0;
+    currentCoins = 0;
+    aggiornaCoinsHud();
     mostraLogin();
 }
 
@@ -286,6 +308,8 @@ function entraComeOspite() {
     currentUser = null;
     isGuest = true;
     bestScoreCache = 0;
+    currentCoins = 0;
+    aggiornaCoinsHud();
     mostraMenuPrincipale();
 }
 
@@ -337,6 +361,62 @@ async function salvaPunteggio(score) {
     }
 }
 
+// --- Profilo & Monete ---
+async function caricaProfilo() {
+    if (!sbClient || !currentUser) {
+        currentCoins = 0;
+        aggiornaCoinsHud();
+        return;
+    }
+    try {
+        const { data, error } = await sbClient
+            .from('profiles')
+            .select('coins')
+            .eq('id', currentUser.id)
+            .maybeSingle();
+        if (error) throw error;
+        
+        if (data) {
+            currentCoins = data.coins || 0;
+        } else {
+            await sbClient.from('profiles').insert({
+                id: currentUser.id,
+                username: currentUser.username,
+                coins: 0
+            });
+            currentCoins = 0;
+        }
+        aggiornaCoinsHud();
+    } catch (e) {
+        console.warn("Errore caricamento profilo:", e);
+    }
+}
+
+async function aggiungiMoneta(quantita = 1) {
+    currentCoins += quantita;
+    aggiornaCoinsHud();
+    if (!sbClient || !currentUser) return; // ospite: solo in memoria
+    try {
+        await sbClient
+            .from('profiles')
+            .update({ coins: currentCoins })
+            .eq('id', currentUser.id);
+    } catch (e) {
+        console.warn("Errore salvataggio moneta:", e);
+    }
+}
+
+function aggiornaCoinsHud() {
+    if (coinsValue) coinsValue.innerText = currentCoins;
+}
+
+function mostraToastMoneta() {
+    if (!coinToast) return;
+    coinToast.classList.remove('show');
+    void coinToast.offsetWidth; // forza reflow per far ripartire l'animazione
+    coinToast.classList.add('show');
+}
+
 // ============================================================
 // 6. AUDIO
 // ============================================================
@@ -371,6 +451,18 @@ function riproduciSuonoVita() {
         } catch (e) {}
     }
     suonaVitaProcedurale();
+}
+
+function riproduciSuonoMoneta() {
+    ensureAudioReady();
+    if (suonoMonetaAudio) {
+        try {
+            suonoMonetaAudio.currentTime = 0;
+            suonoMonetaAudio.play().catch(() => {});
+            return;
+        } catch (e) {}
+    }
+    // Nessun fallback procedurale: se il file manca, silenzio.
 }
 
 function suonaGhiaccioProcedurale() {
@@ -444,6 +536,7 @@ function caricaAssetMondo(mondo) {
     pallaImage = null;
     suonoParolaAudio = null;
     suonoVitaAudio = null;
+    suonoMonetaAudio = null;
     aggiornaPosizionePersonaggio();
     
     const imgBg = new Image();
@@ -499,6 +592,19 @@ function caricaAssetMondo(mondo) {
             console.warn("Suono vita non caricato: " + mondo.suonoVita);
         });
         a.src = mondo.suonoVita;
+    }
+    
+    if (mondo.suonoMoneta) {
+        const a = new Audio();
+        a.preload = 'auto';
+        a.volume = VOLUME_SUONO_MONETA;
+        a.addEventListener('canplaythrough', () => {
+            if (mondoCorrente === mondo) suonoMonetaAudio = a;
+        }, { once: true });
+        a.addEventListener('error', () => {
+            console.warn("Suono moneta non caricato: " + mondo.suonoMoneta);
+        });
+        a.src = mondo.suonoMoneta;
     }
 }
 
@@ -590,14 +696,15 @@ function mostraMenuPrincipale() {
     speedSlider.disabled = false;
     applicaSpeedSlider();
     multiplierHud.classList.remove('active');
+    coinsHud.classList.remove('active');
     pauseBtn.style.display = 'none';
     
     if (currentUser) {
         welcomeUser.innerHTML = `Ciao, <strong>${currentUser.username}</strong>!<br>
-            Record personale: <strong>${bestScoreCache}</strong>`;
+            Record: <strong>${bestScoreCache}</strong> · Monete: <strong>🪙 ${currentCoins}</strong>`;
         menuLogoutBtn.style.display = 'block';
     } else if (isGuest) {
-        welcomeUser.textContent = "Stai giocando come ospite — i record non verranno salvati.";
+        welcomeUser.textContent = "Stai giocando come ospite — record e monete non verranno salvati.";
         menuLogoutBtn.style.display = 'block';
     } else {
         welcomeUser.textContent = "Impara a scrivere divertendoti!";
@@ -676,6 +783,7 @@ function avviaGioco(mondo) {
     giocoAttivo = true;
     speedSlider.disabled = true;
     multiplierHud.classList.add('active');
+    coinsHud.classList.add('active');
     pauseBtn.style.display = 'flex';
     nascondiTutteLeSchermate();
     ensureAudioReady();
@@ -807,11 +915,17 @@ function creaParola() {
     const minX = margine + halfNuova;
     const maxX = canvas.width - margine - halfNuova;
     
+    const probOro = (typeof mondoCorrente.probabilitaOro === 'number')
+        ? mondoCorrente.probabilitaOro
+        : 0.08;
+    const dorata = Math.random() < probOro;
+    
     if (minX >= maxX) {
         paroleCadenti.push({
             testo, x: canvas.width / 2, y: -30,
             velocita: velocitaBase * (0.9 + Math.random() * 0.2),
-            colpita: false, inDistruzione: false
+            colpita: false, inDistruzione: false,
+            dorata: dorata
         });
         return;
     }
@@ -843,7 +957,8 @@ function creaParola() {
     paroleCadenti.push({
         testo, x: migliorX, y: -30,
         velocita: velocitaBase * (0.9 + Math.random() * 0.2),
-        colpita: false, inDistruzione: false
+        colpita: false, inDistruzione: false,
+        dorata: dorata
     });
 }
 
@@ -889,6 +1004,10 @@ function completaParola(parola) {
     const puntiBase = 10 * parola.testo.length;
     punteggio += Math.round(puntiBase * moltiplicatore);
     scoreDisplay.innerText = punteggio;
+    
+    // La moneta, il toast e il suono vengono gestiti SOLO al momento
+    // dell'impatto con la palla di neve (vedi aggiornaPalleNeve).
+    
     lanciaPallaVerso(parola);
     parolaAttiva = null;
     lettereDigitate = 0;
@@ -923,8 +1042,17 @@ function aggiornaPalleNeve(now) {
         p.currY = yBase - Math.sin(t * Math.PI) * ARCO_PALLA;
         p.rotazione += 0.20;
         if (t >= 1) {
-            creaEsplosione(p.parola.x, p.parola.y);
+            // Impatto: esplosione + suono parola
+            creaEsplosione(p.parola.x, p.parola.y, p.parola.dorata);
             riproduciSuonoParola();
+            
+            // Se dorata, assegna moneta + toast + suono moneta SOLO ORA
+            if (p.parola.dorata) {
+                aggiungiMoneta(1);
+                mostraToastMoneta();
+                riproduciSuonoMoneta();
+            }
+            
             p.parola.colpita = true;
             palleNeve.splice(i, 1);
         }
@@ -1009,14 +1137,17 @@ function disegnaPupazzoNeveFallback(w, h) {
 // ============================================================
 // 15. PARTICELLE
 // ============================================================
-function creaEsplosione(x, y) {
+function creaEsplosione(x, y, dorata = false) {
     for (let i = 0; i < 18; i++) {
+        const colore = dorata
+            ? `hsl(${40 + Math.random() * 15}, 100%, ${60 + Math.random() * 25}%)`
+            : `hsl(${180 + Math.random() * 40}, 100%, ${55 + Math.random() * 30}%)`;
         particelle.push({
             x, y,
             vx: (Math.random() - 0.5) * 8,
             vy: (Math.random() - 0.5) * 8,
             vita: 1,
-            colore: `hsl(${180 + Math.random() * 40}, 100%, ${55 + Math.random() * 30}%)`,
+            colore,
             raggio: 2 + Math.random() * 3
         });
     }
@@ -1056,14 +1187,16 @@ function disegnaParticelle() {
 }
 
 // ============================================================
-// 16. DISEGNO PAROLE
+// 16. DISEGNO PAROLE (bolle)
 // ============================================================
 function disegnaParole() {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const shakeOffset = shakeTimer > 0 ? Math.sin(shakeTimer * 1.5) * 4 : 0;
+    
     for (const p of paroleCadenti) {
         if (p.colpita) continue;
+        
         ctx.font = `bold ${FONT_SIZE_PAROLE}px 'Segoe UI', Arial`;
         const larghezza = ctx.measureText(p.testo).width;
         const padding = 18;
@@ -1072,6 +1205,66 @@ function disegnaParole() {
         const drawX = p.x + offsetX;
         const drawY = p.y + offsetY;
         
+        // --- BOLLA DORATA ---
+        if (p.dorata) {
+            ctx.shadowColor = 'rgba(255, 215, 0, 0.85)';
+            ctx.shadowBlur = 18;
+            
+            const grad = ctx.createLinearGradient(
+                drawX - larghezza/2, drawY - FONT_SIZE_PAROLE/2,
+                drawX + larghezza/2, drawY + FONT_SIZE_PAROLE/2
+            );
+            grad.addColorStop(0, '#FFF2A0');
+            grad.addColorStop(0.5, '#FFD700');
+            grad.addColorStop(1, '#C99A00');
+            
+            ctx.fillStyle = grad;
+            ctx.strokeStyle = shakeTimer > 0 && parolaAttiva === p
+                ? "rgba(255, 60, 60, 1)"
+                : "#8B6914";
+            ctx.lineWidth = 3;
+            
+            roundRect(ctx, drawX - larghezza/2 - padding,
+                      drawY - FONT_SIZE_PAROLE/2 - 10,
+                      larghezza + padding*2,
+                      FONT_SIZE_PAROLE + 20, 14);
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            
+            if (parolaAttiva === p) {
+                const parteFatta = p.testo.substring(0, lettereDigitate);
+                const parteResta = p.testo.substring(lettereDigitate);
+                const larghezzaFatta = ctx.measureText(parteFatta).width;
+                const larghezzaResta = ctx.measureText(parteResta).width;
+                const totale = larghezzaFatta + larghezzaResta;
+                const startX = drawX - totale / 2;
+                
+                ctx.textAlign = "left";
+                ctx.fillStyle = "#ffffff";
+                ctx.shadowColor = "rgba(0,0,0,0.6)";
+                ctx.shadowBlur = 3;
+                ctx.fillText(parteFatta, startX, drawY);
+                
+                ctx.fillStyle = "#2a1a00";
+                ctx.shadowColor = "transparent";
+                ctx.shadowBlur = 0;
+                ctx.fillText(parteResta, startX + larghezzaFatta, drawY);
+                ctx.textAlign = "center";
+            } else if (p.inDistruzione) {
+                ctx.fillStyle = "#2a1a00";
+                ctx.fillText(p.testo, drawX, drawY);
+            } else {
+                ctx.fillStyle = "#2a1a00";
+                ctx.fillText(p.testo, drawX, drawY);
+            }
+            
+            continue;
+        }
+        
+        // --- BOLLA NORMALE ---
         if (parolaAttiva === p) {
             ctx.fillStyle = "rgba(44, 66, 74, 0.95)";
             ctx.strokeStyle = shakeTimer > 0 ? "rgba(255, 100, 100, 0.9)" : "rgba(0, 212, 255, 0.9)";
@@ -1086,8 +1279,10 @@ function disegnaParole() {
             ctx.lineWidth = 2.5;
         }
         
-        roundRect(ctx, drawX - larghezza/2 - padding, drawY - FONT_SIZE_PAROLE/2 - 10,
-                  larghezza + padding*2, FONT_SIZE_PAROLE + 20, 14);
+        roundRect(ctx, drawX - larghezza/2 - padding,
+                  drawY - FONT_SIZE_PAROLE/2 - 10,
+                  larghezza + padding*2,
+                  FONT_SIZE_PAROLE + 20, 14);
         ctx.fill(); ctx.stroke();
         
         if (parolaAttiva === p) {
@@ -1204,6 +1399,7 @@ async function finePartita() {
     gameOverOverlay.style.display = 'flex';
     targetDisplay.innerText = '-';
     multiplierHud.classList.remove('active');
+    coinsHud.classList.remove('active');
     pauseBtn.style.display = 'none';
     speedSlider.disabled = false;
     
@@ -1313,7 +1509,7 @@ async function init() {
     if (sessione) {
         currentUser = sessione;
         isGuest = false;
-        await caricaBestScore();
+        await Promise.all([caricaBestScore(), caricaProfilo()]);
         mostraMenuPrincipale();
     } else if (!sbClient) {
         isGuest = true;

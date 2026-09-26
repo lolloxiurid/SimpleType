@@ -32,23 +32,11 @@ const MONDI = [
         palla: "images/twSnowball.png",
         dizionario: ["NEVE", "GELO", "ORSO", "PINO", "CASA", "SOLE", "VENTO", "STELLA", "FIOCCO", "GATTO", "CANE", "MARE", "LUNA", "PANE", "MANO", "PALLA", "BOCCA", "ACQUA"],
         suonoParola: "sounds/wordIce.mp3",
-        suonoVita: "sounds/lostLife.mp3"
+        suonoVita: "sounds/lostLife.mp3",
+        suonoMoneta: "sounds/coin.mp3",
+        probabilitaOro: 0.1
     }
     
-    // ESEMPIO: nuovo mondo
-    // ,
-    // {
-    //     id: "foresta",
-    //     nome: "Foresta Incantata",
-    //     descrizione: "Avventurati tra gli alberi con una volpe curiosa.",
-    //     thumbnail: "images/foresta-thumb.jpg",
-    //     sfondo: "images/foresta-bg.jpg",
-    //     personaggio: "images/volpe.png",
-    //     palla: "images/ghianda.png",
-    //     dizionario: ["ALBERO", "FOGLIA", "VOLPE", "FUNGO", "RUSCELLO"],
-    //     suonoParola: "sounds/leaf.mp3",
-    //     suonoVita: "sounds/forest-life.mp3"
-    // }
 ];
 
 // ============================================================
