@@ -69,7 +69,8 @@ const MONDI = [
         // Scala del proiettile (moltiplicatore di DIMENSIONE_PALLA).
         // Se omesso, usa il valore globale SCALA_PALLA.
         scalaPalla: 1,
-        scalaPersonaggio: 1.0
+        scalaPersonaggio: 1.0,
+        offsetYPersonaggio: 0
     }
     ,
     {
@@ -93,7 +94,8 @@ const MONDI = [
             bottom: "rgb(16, 16, 16)"
         },
         scalaPalla: 2.5,
-        scalaPersonaggio: 1.5
+        scalaPersonaggio: 1.5,
+        offsetYPersonaggio: +15
     }
 ];
 

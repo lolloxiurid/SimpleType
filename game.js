@@ -84,8 +84,6 @@ const hearts = [
 // ============================================================
 // 2. SUPABASE CLIENT
 // ============================================================
-// NON chiamare questa variabile `supabase`: la libreria CDN crea
-// `window.supabase` non-configurabile e la ridefinizione andrebbe in errore.
 let sbClient = null;
 let currentUser = null;
 let isGuest = false;
@@ -163,20 +161,63 @@ let bestScoreCache = 0;
 // Monete
 let currentCoins = 0;
 
-// Mondi sbloccati (Set di id mondo). I mondi con costo 0 sono sempre sbloccati.
+// Mondi sbloccati
 let currentUnlockedWorlds = new Set();
 
 // ============================================================
-// 4. POSIZIONAMENTO PERSONAGGIO
+// 4. HELPER MONDI E PERSONAGGIO
+//    (definite QUI, prima di qualunque uso runtime)
+// ============================================================
+function isMondoSbloccato(mondo) {
+    if (!mondo) return false;
+    if (!mondo.costo || mondo.costo <= 0) return true;
+    return currentUnlockedWorlds.has(mondo.id);
+}
+
+// Restituisce la scala del proiettile per il mondo corrente.
+function getScalaPalla() {
+    const scala = mondoCorrente && typeof mondoCorrente.scalaPalla === 'number'
+        ? mondoCorrente.scalaPalla
+        : SCALA_PALLA;
+    return scala;
+}
+
+// Restituisce la scala del personaggio per il mondo corrente.
+function getScalaPersonaggio() {
+    const scala = mondoCorrente && typeof mondoCorrente.scalaPersonaggio === 'number'
+        ? mondoCorrente.scalaPersonaggio
+        : SCALA_PERSONAGGIO;
+    return scala;
+}
+
+// Altezza del personaggio come frazione dell'altezza del canvas.
+// Priorità: `altezzaPersonaggio` del mondo → fallback su ratio * scala.
+function getAltezzaPersonaggioRatio() {
+    if (mondoCorrente && typeof mondoCorrente.altezzaPersonaggio === 'number') {
+        return mondoCorrente.altezzaPersonaggio;
+    }
+    return ALTEZZA_PERSONAGGIO_RATIO * getScalaPersonaggio();
+}
+
+// Offset verticale del personaggio rispetto alla sua base a terra.
+function getOffsetYPersonaggio() {
+    if (mondoCorrente && typeof mondoCorrente.offsetYPersonaggio === 'number') {
+        return mondoCorrente.offsetYPersonaggio;
+    }
+    return 0;
+}
+
+// ============================================================
+// 5. POSIZIONAMENTO PERSONAGGIO
 // ============================================================
 function aggiornaPosizionePersonaggio() {
-    const h = canvas.height * ALTEZZA_PERSONAGGIO_RATIO * getScalaPersonaggio();
+    const h = canvas.height * getAltezzaPersonaggioRatio();
     const w = personaggioImage
         ? h * (personaggioImage.width / personaggioImage.height)
         : h * 0.7;
     posPersonaggio = {
         x: canvas.width / 2,
-        y: canvas.height - ALTEZZA_PAVIMENTO,
+        y: canvas.height - ALTEZZA_PAVIMENTO + getOffsetYPersonaggio(),
         larghezza: w,
         altezza: h
     };
@@ -189,33 +230,6 @@ function resizeCanvas() {
 }
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
-
-// ============================================================
-// 5. HELPER MONDI
-// ============================================================
-function isMondoSbloccato(mondo) {
-    if (!mondo) return false;
-    if (!mondo.costo || mondo.costo <= 0) return true;
-    return currentUnlockedWorlds.has(mondo.id);
-}
-
-// Restituisce la scala del proiettile per il mondo corrente.
-// Se il mondo non specifica `scalaPalla`, usa il default globale.
-function getScalaPalla() {
-    const scala = mondoCorrente && typeof mondoCorrente.scalaPalla === 'number'
-        ? mondoCorrente.scalaPalla
-        : SCALA_PALLA;
-    return scala;
-}
-
-// Restituisce la scala del personaggio per il mondo corrente.
-// Se il mondo non specifica `scalaPersonaggio`, usa il default globale.
-function getScalaPersonaggio() {
-    const scala = mondoCorrente && typeof mondoCorrente.scalaPersonaggio === 'number'
-        ? mondoCorrente.scalaPersonaggio
-        : SCALA_PERSONAGGIO;
-    return scala;
-}
 
 // ============================================================
 // 6. AUTENTICAZIONE
@@ -1150,15 +1164,11 @@ function completaParola(parola) {
     punteggio += Math.round(puntiBase * moltiplicatore);
     scoreDisplay.innerText = punteggio;
     
-    // Direzione verso il bersaglio (così l'animazione sa da che lato partire)
     direzionePersonaggio = parola.x > posPersonaggio.x ? 1 : -1;
     
-    // Avvia l'animazione di lancio (anticipazione)
     statoLancio.attivo = true;
     statoLancio.startTime = performance.now();
     
-    // Il proiettile parte DOPO l'anticipazione: così il gesto
-    // e l'oggetto sono visivamente collegati.
     setTimeout(() => {
         lanciaPallaVerso(parola);
     }, DURATA_ANTICIPAZIONE_LANCIO);
@@ -1172,11 +1182,9 @@ function completaParola(parola) {
 // 14. PALLE DI NEVE
 // ============================================================
 function lanciaPallaVerso(parola) {
-    // La direzione è già stata impostata in completaParola
     const manoX = posPersonaggio.x + direzionePersonaggio * posPersonaggio.larghezza * 0.30;
     const manoY = posPersonaggio.y - posPersonaggio.altezza * 0.55;
     
-    // Puff di particelle al punto di rilascio
     creaPuffLancio(manoX, manoY);
     
     palleNeve.push({
@@ -1190,7 +1198,6 @@ function lanciaPallaVerso(parola) {
     });
 }
 
-// Piccolo sbuffo di particelle che simula l'aria mossa dal lancio
 function creaPuffLancio(x, y) {
     for (let i = 0; i < 8; i++) {
         particelle.push({
@@ -1237,7 +1244,6 @@ function disegnaPalleNeve() {
         ctx.translate(p.currX, p.currY);
         ctx.rotate(p.rotazione);
         
-        // Scia di movimento: un alone morbido dietro il proiettile
         ctx.shadowColor = 'rgba(180, 220, 240, 0.7)';
         ctx.shadowBlur = 10;
         
@@ -1264,19 +1270,17 @@ function disegnaPalleNeve() {
 }
 
 // ============================================================
-// 15. DISEGNO PERSONAGGIO (con animazione procedurale)
+// 15. DISEGNO PERSONAGGIO
 // ============================================================
 function disegnaPersonaggio(now) {
     if (!now) now = performance.now();
     
-    // --- Calcola le trasformazioni in base allo stato di lancio ---
     let offsetY = 0;
     let rotazione = 0;
     let scaleX = 1;
     let scaleY = 1;
     
     if (!statoLancio.attivo) {
-        // IDLE: respiro dolce su e giù
         offsetY = Math.sin(now * VELOCITA_IDLE_BOB) * AMPIEZZA_IDLE_BOB;
     } else {
         const elapsed = now - statoLancio.startTime;
@@ -1284,35 +1288,25 @@ function disegnaPersonaggio(now) {
         const fineFollow = fineAnticip + DURATA_FOLLOWTHROUGH_LANCIO;
         
         if (elapsed < fineAnticip) {
-            // ANTICIPAZIONE: si accuccia e si inclina indietro
             const prog = elapsed / fineAnticip;
-            const ease = prog * prog; // ease-in (accelerazione)
-            
-            offsetY = ease * 7;                 // scende di 7px
-            scaleY = 1 - ease * 0.09;           // si schiaccia in Y
-            scaleX = 1 + ease * 0.06;           // si allarga in X
-            // Inclinazione indietro (opposta alla direzione di lancio)
+            const ease = prog * prog;
+            offsetY = ease * 7;
+            scaleY = 1 - ease * 0.09;
+            scaleX = 1 + ease * 0.06;
             rotazione = -ease * 0.10 * direzionePersonaggio;
         } else if (elapsed < fineFollow) {
-            // FOLLOW-THROUGH: si protende in avanti e rimbalza
             const prog = (elapsed - fineAnticip) / DURATA_FOLLOWTHROUGH_LANCIO;
-            const ease = 1 - Math.pow(1 - prog, 3); // ease-out
-            
-            const curvaY = Math.sin(prog * Math.PI); // 0 → 1 → 0
+            const ease = 1 - Math.pow(1 - prog, 3);
+            const curvaY = Math.sin(prog * Math.PI);
             offsetY = -curvaY * 3;
-            
             scaleY = (1 - ease) * 0.91 + ease * 1.0;
             scaleX = (1 - ease) * 1.06 + ease * 1.0;
-            
-            // Da inclinazione indietro a inclinazione in avanti
             rotazione = ((-0.10 + prog * 0.20)) * direzionePersonaggio;
         } else {
-            // Fine animazione
             statoLancio.attivo = false;
         }
     }
     
-    // --- Ombra sotto il personaggio (ellisse morbida) ---
     ctx.save();
     ctx.globalAlpha = 0.28;
     ctx.fillStyle = "#1a2830";
@@ -1327,17 +1321,10 @@ function disegnaPersonaggio(now) {
     ctx.fill();
     ctx.restore();
     
-    // --- Disegno del personaggio ---
     ctx.save();
     ctx.translate(posPersonaggio.x, posPersonaggio.y + offsetY);
-    
-    // Rotazione in spazio mondo (prima del flip)
     ctx.rotate(rotazione);
-    
-    // Flip orizzontale se il personaggio guarda a sinistra
     if (direzionePersonaggio === -1) ctx.scale(-1, 1);
-    
-    // Squash & stretch
     ctx.scale(scaleX, scaleY);
     
     if (personaggioImage) {
@@ -1421,7 +1408,6 @@ function aggiornaParticelle() {
     for (let i = particelle.length - 1; i >= 0; i--) {
         const p = particelle[i];
         p.x += p.vx; p.y += p.vy; p.vy += 0.15;
-        // Usa il decadimento personalizzato se presente, altrimenti default
         p.vita -= (p.decadimento !== undefined ? p.decadimento : 0.02);
         if (p.vita <= 0) particelle.splice(i, 1);
     }
@@ -1439,7 +1425,7 @@ function disegnaParticelle() {
 }
 
 // ============================================================
-// 17. DISEGNO PAROLE (bolle)
+// 17. DISEGNO PAROLE
 // ============================================================
 function disegnaParole() {
     ctx.textAlign = "center";
@@ -1589,13 +1575,11 @@ function disegnaSfondo() {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
     
-    // Effetto neve: solo se il mondo corrente lo prevede
     if (mondoCorrente.effettoNeve) {
         disegnaNeveCadente();
     }
 }
 
-// Effetto neve scorrevole sullo sfondo (opzionale per mondo)
 function disegnaNeveCadente() {
     ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
     const tempo = performance.now();
@@ -1611,20 +1595,17 @@ function disegnaNeveCadente() {
 function disegnaPavimento() {
     const floorTop = canvas.height - ALTEZZA_PAVIMENTO;
     
-    // Colori configurabili per mondo (con fallback di default)
     const colori = mondoCorrente.coloriPavimento || {
         top: "rgba(248, 253, 255, 0.96)",
         bottom: "rgba(190, 220, 240, 1)"
     };
     
-    // Corpo del pavimento: gradiente verticale a 2 colori
     const grad = ctx.createLinearGradient(0, floorTop, 0, canvas.height);
     grad.addColorStop(0, colori.top);
     grad.addColorStop(1, colori.bottom);
     ctx.fillStyle = grad;
     ctx.fillRect(0, floorTop, canvas.width, ALTEZZA_PAVIMENTO);
     
-    // Superficie ondulata con il colore top
     ctx.fillStyle = colori.top;
     ctx.beginPath();
     ctx.moveTo(0, floorTop);
