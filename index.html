@@ -15,7 +15,7 @@
         
         <button id="pause-btn" title="Pausa">⏸</button>
         
-                <div id="hearts-hud">
+        <div id="hearts-hud">
             <span class="heart" id="heart-1">❤️</span>
             <span class="heart" id="heart-2">❤️</span>
             <span class="heart" id="heart-3">❤️</span>
@@ -79,6 +79,8 @@
                 <h1 class="menu-title" id="world-overview-name">—</h1>
                 <p class="menu-subtitle" id="world-overview-desc">—</p>
                 <button class="menu-btn menu-btn-primary" id="world-overview-play-btn">▶ Gioca</button>
+                <button class="menu-btn menu-btn-unlock" id="world-overview-unlock-btn" style="display: none;">🔓 Sblocca</button>
+                <div id="world-overview-locked-msg" class="locked-msg" style="display: none;"></div>
                 <div class="menu-buttons-row">
                     <button class="menu-btn menu-btn-secondary" id="world-overview-back-btn">← Indietro</button>
                 </div>
@@ -156,7 +158,6 @@
         <div id="multiplier-info">Moltiplicatore: <span class="molt-value" id="multiplier-info-value">x1.0</span></div>
     </div>
 
-    <!-- Supabase via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="config.js"></script>
     <script src="game.js"></script>

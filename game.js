@@ -53,6 +53,8 @@ const worldOverviewImg = document.getElementById('world-overview-img');
 const worldOverviewName = document.getElementById('world-overview-name');
 const worldOverviewDesc = document.getElementById('world-overview-desc');
 const worldOverviewPlayBtn = document.getElementById('world-overview-play-btn');
+const worldOverviewUnlockBtn = document.getElementById('world-overview-unlock-btn');
+const worldOverviewLockedMsg = document.getElementById('world-overview-locked-msg');
 const worldOverviewBackBtn = document.getElementById('world-overview-back-btn');
 
 // Pausa
@@ -149,17 +151,26 @@ let parolaAttiva = null;
 let lettereDigitate = 0;
 let shakeTimer = 0;
 
+// Animazione del personaggio
+let statoLancio = {
+    attivo: false,
+    startTime: 0
+};
+
 // Record
 let bestScoreCache = 0;
 
 // Monete
 let currentCoins = 0;
 
+// Mondi sbloccati (Set di id mondo). I mondi con costo 0 sono sempre sbloccati.
+let currentUnlockedWorlds = new Set();
+
 // ============================================================
 // 4. POSIZIONAMENTO PERSONAGGIO
 // ============================================================
 function aggiornaPosizionePersonaggio() {
-    const h = canvas.height * ALTEZZA_PERSONAGGIO_RATIO;
+    const h = canvas.height * ALTEZZA_PERSONAGGIO_RATIO * getScalaPersonaggio();
     const w = personaggioImage
         ? h * (personaggioImage.width / personaggioImage.height)
         : h * 0.7;
@@ -180,7 +191,34 @@ window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
 // ============================================================
-// 5. AUTENTICAZIONE
+// 5. HELPER MONDI
+// ============================================================
+function isMondoSbloccato(mondo) {
+    if (!mondo) return false;
+    if (!mondo.costo || mondo.costo <= 0) return true;
+    return currentUnlockedWorlds.has(mondo.id);
+}
+
+// Restituisce la scala del proiettile per il mondo corrente.
+// Se il mondo non specifica `scalaPalla`, usa il default globale.
+function getScalaPalla() {
+    const scala = mondoCorrente && typeof mondoCorrente.scalaPalla === 'number'
+        ? mondoCorrente.scalaPalla
+        : SCALA_PALLA;
+    return scala;
+}
+
+// Restituisce la scala del personaggio per il mondo corrente.
+// Se il mondo non specifica `scalaPersonaggio`, usa il default globale.
+function getScalaPersonaggio() {
+    const scala = mondoCorrente && typeof mondoCorrente.scalaPersonaggio === 'number'
+        ? mondoCorrente.scalaPersonaggio
+        : SCALA_PERSONAGGIO;
+    return scala;
+}
+
+// ============================================================
+// 6. AUTENTICAZIONE
 // ============================================================
 function setAuthMessage(msg, type = 'info') {
     authMessage.textContent = msg;
@@ -248,6 +286,7 @@ async function registrati(username, password) {
         console.warn("Errore creazione profilo:", e);
     }
     currentCoins = 0;
+    currentUnlockedWorlds = new Set();
     aggiornaCoinsHud();
     
     setAuthMessage("Registrazione completata!", "success");
@@ -287,7 +326,11 @@ async function accedi(username, password) {
     
     setAuthMessage("Accesso riuscito!", "success");
     setTimeout(async () => {
-        await Promise.all([caricaBestScore(), caricaProfilo()]);
+        await Promise.all([
+            caricaBestScore(),
+            caricaProfilo(),
+            caricaMondiSbloccati()
+        ]);
         mostraMenuPrincipale();
     }, 400);
 }
@@ -300,6 +343,7 @@ async function logout() {
     isGuest = false;
     bestScoreCache = 0;
     currentCoins = 0;
+    currentUnlockedWorlds = new Set();
     aggiornaCoinsHud();
     mostraLogin();
 }
@@ -309,6 +353,7 @@ function entraComeOspite() {
     isGuest = true;
     bestScoreCache = 0;
     currentCoins = 0;
+    currentUnlockedWorlds = new Set();
     aggiornaCoinsHud();
     mostraMenuPrincipale();
 }
@@ -395,7 +440,7 @@ async function caricaProfilo() {
 async function aggiungiMoneta(quantita = 1) {
     currentCoins += quantita;
     aggiornaCoinsHud();
-    if (!sbClient || !currentUser) return; // ospite: solo in memoria
+    if (!sbClient || !currentUser) return;
     try {
         await sbClient
             .from('profiles')
@@ -413,12 +458,56 @@ function aggiornaCoinsHud() {
 function mostraToastMoneta() {
     if (!coinToast) return;
     coinToast.classList.remove('show');
-    void coinToast.offsetWidth; // forza reflow per far ripartire l'animazione
+    void coinToast.offsetWidth;
     coinToast.classList.add('show');
 }
 
+// --- Mondi sbloccati ---
+async function caricaMondiSbloccati() {
+    currentUnlockedWorlds = new Set();
+    if (!sbClient || !currentUser) return;
+    try {
+        const { data, error } = await sbClient
+            .from('unlocked_worlds')
+            .select('world_id')
+            .eq('user_id', currentUser.id);
+        if (error) throw error;
+        (data || []).forEach(row => currentUnlockedWorlds.add(row.world_id));
+    } catch (e) {
+        console.warn("Errore caricamento mondi sbloccati:", e);
+    }
+}
+
+async function sbloccaMondo(mondo) {
+    if (!mondo) return false;
+    if (isMondoSbloccato(mondo)) return true;
+    if (!mondo.costo || mondo.costo <= 0) return true;
+    if (currentCoins < mondo.costo) return false;
+    
+    currentCoins -= mondo.costo;
+    aggiornaCoinsHud();
+    currentUnlockedWorlds.add(mondo.id);
+    
+    if (sbClient && currentUser) {
+        try {
+            await sbClient
+                .from('profiles')
+                .update({ coins: currentCoins })
+                .eq('id', currentUser.id);
+            
+            await sbClient
+                .from('unlocked_worlds')
+                .insert({ user_id: currentUser.id, world_id: mondo.id });
+        } catch (e) {
+            console.warn("Errore salvataggio sblocco:", e);
+        }
+    }
+    
+    return true;
+}
+
 // ============================================================
-// 6. AUDIO
+// 7. AUDIO
 // ============================================================
 function ensureAudioReady() {
     if (!audioCtx) {
@@ -462,7 +551,6 @@ function riproduciSuonoMoneta() {
             return;
         } catch (e) {}
     }
-    // Nessun fallback procedurale: se il file manca, silenzio.
 }
 
 function suonaGhiaccioProcedurale() {
@@ -527,7 +615,7 @@ function suonaVitaProcedurale() {
 }
 
 // ============================================================
-// 7. CARICAMENTO ASSET
+// 8. CARICAMENTO ASSET
 // ============================================================
 function caricaAssetMondo(mondo) {
     sfondoImage = null;
@@ -632,7 +720,7 @@ function creaSfondoSfocato(img, blurPx) {
 }
 
 // ============================================================
-// 8. VELOCITÀ E MOLTIPLICATORE
+// 9. VELOCITÀ E MOLTIPLICATORE
 // ============================================================
 function calcolaMoltiplicatore(livello) {
     return 1 + (livello - 1) * 0.5;
@@ -649,7 +737,7 @@ function applicaSpeedSlider() {
 speedSlider.addEventListener('input', applicaSpeedSlider);
 
 // ============================================================
-// 9. NAVIGAZIONE SCHERMATE
+// 10. NAVIGAZIONE SCHERMATE
 // ============================================================
 function resetStatoGioco() {
     punteggio = 0;
@@ -663,6 +751,8 @@ function resetStatoGioco() {
     prossimaSogliaSpawn = 110;
     shakeTimer = 0;
     direzionePersonaggio = 1;
+    statoLancio.attivo = false;
+    statoLancio.startTime = 0;
     scoreDisplay.innerText = '0';
     targetDisplay.innerText = '-';
     hearts.forEach(h => h.classList.remove('lost', 'pulse'));
@@ -729,8 +819,10 @@ function mostraSelezioneMondi() {
 function renderizzaListaMondi() {
     worldList.innerHTML = '';
     MONDI.forEach(mondo => {
+        const unlocked = isMondoSbloccato(mondo);
+        
         const card = document.createElement('button');
-        card.className = 'world-card';
+        card.className = 'world-card' + (unlocked ? '' : ' locked');
         card.type = 'button';
         
         const thumb = document.createElement('img');
@@ -754,6 +846,14 @@ function renderizzaListaMondi() {
         info.appendChild(desc);
         card.appendChild(thumb);
         card.appendChild(info);
+        
+        if (!unlocked) {
+            const lock = document.createElement('div');
+            lock.className = 'world-card-lock';
+            lock.textContent = `🔒 🪙 ${mondo.costo}`;
+            card.appendChild(lock);
+        }
+        
         card.addEventListener('click', (e) => {
             e.stopPropagation();
             mostraOverviewMondo(mondo);
@@ -769,12 +869,44 @@ function mostraOverviewMondo(mondo) {
     worldOverviewImg.onerror = () => { worldOverviewImg.style.opacity = '0.3'; };
     worldOverviewName.textContent = mondo.nome;
     worldOverviewDesc.textContent = mondo.descrizione;
+    
+    const unlocked = isMondoSbloccato(mondo);
+    
+    if (unlocked) {
+        worldOverviewPlayBtn.style.display = 'block';
+        worldOverviewUnlockBtn.style.display = 'none';
+        worldOverviewLockedMsg.style.display = 'none';
+    } else {
+        worldOverviewPlayBtn.style.display = 'none';
+        worldOverviewUnlockBtn.style.display = 'block';
+        
+        const costo = mondo.costo || 0;
+        const puoiPermetterti = currentCoins >= costo;
+        
+        worldOverviewUnlockBtn.textContent = `🔓 Sblocca per 🪙 ${costo}`;
+        worldOverviewUnlockBtn.disabled = !puoiPermetterti;
+        
+        if (puoiPermetterti) {
+            worldOverviewLockedMsg.style.display = 'none';
+        } else {
+            const mancano = costo - currentCoins;
+            worldOverviewLockedMsg.textContent = `Ti mancano ${mancano} 🪙 per sbloccare questo mondo`;
+            worldOverviewLockedMsg.style.display = 'block';
+        }
+    }
+    
     nascondiTutteLeSchermate();
     worldOverviewScreen.style.display = 'flex';
 }
 
 function avviaGioco(mondo) {
     if (!mondo) mondo = mondoInOverview || mondoCorrente;
+    
+    if (!isMondoSbloccato(mondo)) {
+        console.warn("Tentativo di avviare un mondo bloccato: " + mondo.id);
+        return;
+    }
+    
     if (mondo !== mondoCorrente) {
         mondoCorrente = mondo;
         caricaAssetMondo(mondo);
@@ -837,6 +969,19 @@ worldSelectBackBtn.addEventListener('click', (e) => {
     mainMenu.style.display = 'flex';
 });
 worldOverviewPlayBtn.addEventListener('click', (e) => { e.stopPropagation(); avviaGioco(mondoInOverview); });
+worldOverviewUnlockBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!mondoInOverview) return;
+    if (isMondoSbloccato(mondoInOverview)) return;
+    
+    const ok = await sbloccaMondo(mondoInOverview);
+    if (ok) {
+        mostraOverviewMondo(mondoInOverview);
+    } else {
+        worldOverviewLockedMsg.textContent = "Non hai abbastanza monete!";
+        worldOverviewLockedMsg.style.display = 'block';
+    }
+});
 worldOverviewBackBtn.addEventListener('click', (e) => { e.stopPropagation(); mostraSelezioneMondi(); });
 pauseResumeBtn.addEventListener('click', (e) => { e.stopPropagation(); riprendiGioco(); });
 pauseMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); mostraMenuPrincipale(); });
@@ -851,7 +996,7 @@ blurSlider.addEventListener('input', (e) => {
 });
 
 // ============================================================
-// 10. INPUT DI GIOCO
+// 11. INPUT DI GIOCO
 // ============================================================
 canvas.addEventListener('click', () => {
     ensureAudioReady();
@@ -889,7 +1034,7 @@ hiddenInput.addEventListener('input', () => {
 });
 
 // ============================================================
-// 11. SPAWN PAROLE
+// 12. SPAWN PAROLE
 // ============================================================
 function misuraLarghezza(testo) {
     ctx.font = `bold ${FONT_SIZE_PAROLE}px 'Segoe UI', Arial`;
@@ -963,7 +1108,7 @@ function creaParola() {
 }
 
 // ============================================================
-// 12. DIGITAZIONE
+// 13. DIGITAZIONE
 // ============================================================
 function controllaLettera(lettera) {
     if (!parolaAttiva) {
@@ -1005,23 +1150,35 @@ function completaParola(parola) {
     punteggio += Math.round(puntiBase * moltiplicatore);
     scoreDisplay.innerText = punteggio;
     
-    // La moneta, il toast e il suono vengono gestiti SOLO al momento
-    // dell'impatto con la palla di neve (vedi aggiornaPalleNeve).
+    // Direzione verso il bersaglio (così l'animazione sa da che lato partire)
+    direzionePersonaggio = parola.x > posPersonaggio.x ? 1 : -1;
     
-    lanciaPallaVerso(parola);
+    // Avvia l'animazione di lancio (anticipazione)
+    statoLancio.attivo = true;
+    statoLancio.startTime = performance.now();
+    
+    // Il proiettile parte DOPO l'anticipazione: così il gesto
+    // e l'oggetto sono visivamente collegati.
+    setTimeout(() => {
+        lanciaPallaVerso(parola);
+    }, DURATA_ANTICIPAZIONE_LANCIO);
+    
     parolaAttiva = null;
     lettereDigitate = 0;
     targetDisplay.innerText = '-';
 }
 
 // ============================================================
-// 13. PALLE DI NEVE
+// 14. PALLE DI NEVE
 // ============================================================
 function lanciaPallaVerso(parola) {
-    const versoDestra = parola.x > posPersonaggio.x;
-    direzionePersonaggio = versoDestra ? 1 : -1;
+    // La direzione è già stata impostata in completaParola
     const manoX = posPersonaggio.x + direzionePersonaggio * posPersonaggio.larghezza * 0.30;
     const manoY = posPersonaggio.y - posPersonaggio.altezza * 0.55;
+    
+    // Puff di particelle al punto di rilascio
+    creaPuffLancio(manoX, manoY);
+    
     palleNeve.push({
         startX: manoX, startY: manoY,
         endX: parola.x, endY: parola.y,
@@ -1033,6 +1190,22 @@ function lanciaPallaVerso(parola) {
     });
 }
 
+// Piccolo sbuffo di particelle che simula l'aria mossa dal lancio
+function creaPuffLancio(x, y) {
+    for (let i = 0; i < 8; i++) {
+        particelle.push({
+            x: x,
+            y: y,
+            vx: (Math.random() - 0.5) * 3.5,
+            vy: (Math.random() - 0.5) * 3.5 - 1.2,
+            vita: 0.7,
+            colore: 'rgba(255, 255, 255, 0.9)',
+            raggio: 1.5 + Math.random() * 2,
+            decadimento: 0.035
+        });
+    }
+}
+
 function aggiornaPalleNeve(now) {
     for (let i = palleNeve.length - 1; i >= 0; i--) {
         const p = palleNeve[i];
@@ -1042,11 +1215,9 @@ function aggiornaPalleNeve(now) {
         p.currY = yBase - Math.sin(t * Math.PI) * ARCO_PALLA;
         p.rotazione += 0.20;
         if (t >= 1) {
-            // Impatto: esplosione + suono parola
             creaEsplosione(p.parola.x, p.parola.y, p.parola.dorata);
             riproduciSuonoParola();
             
-            // Se dorata, assegna moneta + toast + suono moneta SOLO ORA
             if (p.parola.dorata) {
                 aggiungiMoneta(1);
                 mostraToastMoneta();
@@ -1060,37 +1231,115 @@ function aggiornaPalleNeve(now) {
 }
 
 function disegnaPalleNeve() {
+    const dim = DIMENSIONE_PALLA * getScalaPalla();
     for (const p of palleNeve) {
         ctx.save();
         ctx.translate(p.currX, p.currY);
         ctx.rotate(p.rotazione);
+        
+        // Scia di movimento: un alone morbido dietro il proiettile
+        ctx.shadowColor = 'rgba(180, 220, 240, 0.7)';
+        ctx.shadowBlur = 10;
+        
         if (pallaImage) {
-            ctx.drawImage(pallaImage, -DIMENSIONE_PALLA / 2, -DIMENSIONE_PALLA / 2, DIMENSIONE_PALLA, DIMENSIONE_PALLA);
+            ctx.drawImage(pallaImage, -dim / 2, -dim / 2, dim, dim);
         } else {
             ctx.fillStyle = "#ffffff";
             ctx.strokeStyle = "#a0d8f0";
             ctx.lineWidth = 2.5;
             ctx.beginPath();
-            ctx.arc(0, 0, DIMENSIONE_PALLA / 2, 0, Math.PI * 2);
+            ctx.arc(0, 0, dim / 2, 0, Math.PI * 2);
             ctx.fill(); ctx.stroke();
             ctx.fillStyle = "rgba(180, 220, 240, 0.5)";
             ctx.beginPath();
-            ctx.arc(-4, -4, 3, 0, Math.PI * 2);
-            ctx.arc(5, 2, 2, 0, Math.PI * 2);
-            ctx.arc(-2, 6, 2, 0, Math.PI * 2);
+            ctx.arc(-dim * 0.11, -dim * 0.11, dim * 0.08, 0, Math.PI * 2);
+            ctx.arc(dim * 0.14, dim * 0.06, dim * 0.06, 0, Math.PI * 2);
+            ctx.arc(-dim * 0.06, dim * 0.17, dim * 0.06, 0, Math.PI * 2);
             ctx.fill();
         }
+        
+        ctx.shadowBlur = 0;
         ctx.restore();
     }
 }
 
 // ============================================================
-// 14. DISEGNO PERSONAGGIO
+// 15. DISEGNO PERSONAGGIO (con animazione procedurale)
 // ============================================================
-function disegnaPersonaggio() {
+function disegnaPersonaggio(now) {
+    if (!now) now = performance.now();
+    
+    // --- Calcola le trasformazioni in base allo stato di lancio ---
+    let offsetY = 0;
+    let rotazione = 0;
+    let scaleX = 1;
+    let scaleY = 1;
+    
+    if (!statoLancio.attivo) {
+        // IDLE: respiro dolce su e giù
+        offsetY = Math.sin(now * VELOCITA_IDLE_BOB) * AMPIEZZA_IDLE_BOB;
+    } else {
+        const elapsed = now - statoLancio.startTime;
+        const fineAnticip = DURATA_ANTICIPAZIONE_LANCIO;
+        const fineFollow = fineAnticip + DURATA_FOLLOWTHROUGH_LANCIO;
+        
+        if (elapsed < fineAnticip) {
+            // ANTICIPAZIONE: si accuccia e si inclina indietro
+            const prog = elapsed / fineAnticip;
+            const ease = prog * prog; // ease-in (accelerazione)
+            
+            offsetY = ease * 7;                 // scende di 7px
+            scaleY = 1 - ease * 0.09;           // si schiaccia in Y
+            scaleX = 1 + ease * 0.06;           // si allarga in X
+            // Inclinazione indietro (opposta alla direzione di lancio)
+            rotazione = -ease * 0.10 * direzionePersonaggio;
+        } else if (elapsed < fineFollow) {
+            // FOLLOW-THROUGH: si protende in avanti e rimbalza
+            const prog = (elapsed - fineAnticip) / DURATA_FOLLOWTHROUGH_LANCIO;
+            const ease = 1 - Math.pow(1 - prog, 3); // ease-out
+            
+            const curvaY = Math.sin(prog * Math.PI); // 0 → 1 → 0
+            offsetY = -curvaY * 3;
+            
+            scaleY = (1 - ease) * 0.91 + ease * 1.0;
+            scaleX = (1 - ease) * 1.06 + ease * 1.0;
+            
+            // Da inclinazione indietro a inclinazione in avanti
+            rotazione = ((-0.10 + prog * 0.20)) * direzionePersonaggio;
+        } else {
+            // Fine animazione
+            statoLancio.attivo = false;
+        }
+    }
+    
+    // --- Ombra sotto il personaggio (ellisse morbida) ---
     ctx.save();
-    ctx.translate(posPersonaggio.x, posPersonaggio.y);
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = "#1a2830";
+    ctx.beginPath();
+    ctx.ellipse(
+        posPersonaggio.x,
+        posPersonaggio.y + 2,
+        posPersonaggio.larghezza * 0.36,
+        6,
+        0, 0, Math.PI * 2
+    );
+    ctx.fill();
+    ctx.restore();
+    
+    // --- Disegno del personaggio ---
+    ctx.save();
+    ctx.translate(posPersonaggio.x, posPersonaggio.y + offsetY);
+    
+    // Rotazione in spazio mondo (prima del flip)
+    ctx.rotate(rotazione);
+    
+    // Flip orizzontale se il personaggio guarda a sinistra
     if (direzionePersonaggio === -1) ctx.scale(-1, 1);
+    
+    // Squash & stretch
+    ctx.scale(scaleX, scaleY);
+    
     if (personaggioImage) {
         ctx.drawImage(personaggioImage,
             -posPersonaggio.larghezza / 2,
@@ -1100,6 +1349,7 @@ function disegnaPersonaggio() {
     } else {
         disegnaPupazzoNeveFallback(posPersonaggio.larghezza, posPersonaggio.altezza);
     }
+    
     ctx.restore();
 }
 
@@ -1135,7 +1385,7 @@ function disegnaPupazzoNeveFallback(w, h) {
 }
 
 // ============================================================
-// 15. PARTICELLE
+// 16. PARTICELLE
 // ============================================================
 function creaEsplosione(x, y, dorata = false) {
     for (let i = 0; i < 18; i++) {
@@ -1170,7 +1420,9 @@ function creaShatterNeve(x, y) {
 function aggiornaParticelle() {
     for (let i = particelle.length - 1; i >= 0; i--) {
         const p = particelle[i];
-        p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.vita -= 0.02;
+        p.x += p.vx; p.y += p.vy; p.vy += 0.15;
+        // Usa il decadimento personalizzato se presente, altrimenti default
+        p.vita -= (p.decadimento !== undefined ? p.decadimento : 0.02);
         if (p.vita <= 0) particelle.splice(i, 1);
     }
 }
@@ -1187,7 +1439,7 @@ function disegnaParticelle() {
 }
 
 // ============================================================
-// 16. DISEGNO PAROLE (bolle)
+// 17. DISEGNO PAROLE (bolle)
 // ============================================================
 function disegnaParole() {
     ctx.textAlign = "center";
@@ -1205,7 +1457,6 @@ function disegnaParole() {
         const drawX = p.x + offsetX;
         const drawY = p.y + offsetY;
         
-        // --- BOLLA DORATA ---
         if (p.dorata) {
             ctx.shadowColor = 'rgba(255, 215, 0, 0.85)';
             ctx.shadowBlur = 18;
@@ -1264,7 +1515,6 @@ function disegnaParole() {
             continue;
         }
         
-        // --- BOLLA NORMALE ---
         if (parolaAttiva === p) {
             ctx.fillStyle = "rgba(44, 66, 74, 0.95)";
             ctx.strokeStyle = shakeTimer > 0 ? "rgba(255, 100, 100, 0.9)" : "rgba(0, 212, 255, 0.9)";
@@ -1323,7 +1573,7 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 // ============================================================
-// 17. SFONDO, PAVIMENTO, NEVE
+// 18. SFONDO, PAVIMENTO, NEVE
 // ============================================================
 function disegnaSfondo() {
     if (sfondoBlurCanvas) {
@@ -1338,6 +1588,15 @@ function disegnaSfondo() {
         ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    
+    // Effetto neve: solo se il mondo corrente lo prevede
+    if (mondoCorrente.effettoNeve) {
+        disegnaNeveCadente();
+    }
+}
+
+// Effetto neve scorrevole sullo sfondo (opzionale per mondo)
+function disegnaNeveCadente() {
     ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
     const tempo = performance.now();
     for (let i = 0; i < 60; i++) {
@@ -1351,14 +1610,22 @@ function disegnaSfondo() {
 
 function disegnaPavimento() {
     const floorTop = canvas.height - ALTEZZA_PAVIMENTO;
+    
+    // Colori configurabili per mondo (con fallback di default)
+    const colori = mondoCorrente.coloriPavimento || {
+        top: "rgba(248, 253, 255, 0.96)",
+        bottom: "rgba(190, 220, 240, 1)"
+    };
+    
+    // Corpo del pavimento: gradiente verticale a 2 colori
     const grad = ctx.createLinearGradient(0, floorTop, 0, canvas.height);
-    grad.addColorStop(0, "rgba(248, 253, 255, 0.96)");
-    grad.addColorStop(0.45, "rgba(220, 240, 252, 0.98)");
-    grad.addColorStop(1, "rgba(190, 220, 240, 1)");
+    grad.addColorStop(0, colori.top);
+    grad.addColorStop(1, colori.bottom);
     ctx.fillStyle = grad;
     ctx.fillRect(0, floorTop, canvas.width, ALTEZZA_PAVIMENTO);
     
-    ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
+    // Superficie ondulata con il colore top
+    ctx.fillStyle = colori.top;
     ctx.beginPath();
     ctx.moveTo(0, floorTop);
     const passo = 10;
@@ -1374,7 +1641,7 @@ function disegnaPavimento() {
 }
 
 // ============================================================
-// 18. CUORI
+// 19. CUORI
 // ============================================================
 function aggiornaCuori() {
     hearts.forEach((heart, index) => {
@@ -1390,7 +1657,7 @@ function aggiornaCuori() {
 }
 
 // ============================================================
-// 19. FINE PARTITA
+// 20. FINE PARTITA
 // ============================================================
 async function finePartita() {
     gameOver = true;
@@ -1431,7 +1698,7 @@ async function finePartita() {
 }
 
 // ============================================================
-// 20. LOOP PRINCIPALE
+// 21. LOOP PRINCIPALE
 // ============================================================
 function draw(timestamp) {
     if (!timestamp) timestamp = performance.now();
@@ -1439,7 +1706,7 @@ function draw(timestamp) {
     
     disegnaSfondo();
     disegnaPavimento();
-    disegnaPersonaggio();
+    disegnaPersonaggio(timestamp);
     
     if (shakeTimer > 0) shakeTimer--;
     
@@ -1494,7 +1761,7 @@ function draw(timestamp) {
 }
 
 // ============================================================
-// 21. INIZIALIZZAZIONE
+// 22. INIZIALIZZAZIONE
 // ============================================================
 async function init() {
     applicaSpeedSlider();
@@ -1509,7 +1776,11 @@ async function init() {
     if (sessione) {
         currentUser = sessione;
         isGuest = false;
-        await Promise.all([caricaBestScore(), caricaProfilo()]);
+        await Promise.all([
+            caricaBestScore(),
+            caricaProfilo(),
+            caricaMondiSbloccati()
+        ]);
         mostraMenuPrincipale();
     } else if (!sbClient) {
         isGuest = true;
